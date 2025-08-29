@@ -48,7 +48,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ student, isDarkMode = fa
   };
 
   const getSuccessMessage = (grade: number) => {
-    if (grade >= 90) {
+    if (grade >= 85) {
       return {
         message: "مبروك! لقد نجحت بتفوق في المسابقة",
         subMessage: "أداء ممتاز ومشرف، استمر في حفظ كتاب الله",
@@ -83,7 +83,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ student, isDarkMode = fa
             <h3 className="text-2xl font-bold">{getRankText(student.rank!)}</h3>
           </div>
           <p className="text-white/90">
-            {student.grade >= 90 ? "تهانينا على هذا الإنجاز الرائع!" : "شكراً لمشاركتك في المسابقة"}
+            {student.grade >= 85 ? "تهانينا على هذا الإنجاز الرائع!" : "شكراً لمشاركتك في المسابقة"}
           </p>
         </div>
 
@@ -175,7 +175,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ student, isDarkMode = fa
               {successInfo.subMessage}
             </p>
             
-            {student.grade >= 90 ? (
+            {student.grade >= 85 ? (
               <div className="space-y-2">
                 <p className="text-white/90 font-semibold">
                   🎉 درجة النجاح: {student.grade} من 100

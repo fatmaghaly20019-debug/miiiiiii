@@ -13,6 +13,36 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
 
+  // دالة لتنظيف النص وإزالة الهمزات والمسافات الزائدة
+  const normalizeText = (text: string): string => {
+    return text
+      .trim()
+      .replace(/\s+/g, ' ') // استبدال المسافات المتعددة بمسافة واحدة
+      .replace(/[أإآ]/g, 'ا') // توحيد الألف
+      .replace(/[ىي]/g, 'ي') // توحيد الياء
+      .replace(/ة/g, 'ه') // استبدال التاء المربوطة بالهاء
+      .replace(/[ؤئ]/g, 'ء') // توحيد الهمزة
+      .toLowerCase();
+  };
+
+  // دالة لتقسيم النص إلى كلمات للبحث المتقدم
+  const getSearchTerms = (text: string): string[] => {
+    const normalized = normalizeText(text);
+    const words = normalized.split(' ').filter(word => word.length > 0);
+    
+    // إذا كان هناك كلمة واحدة فقط، نبحث بها
+    if (words.length === 1) {
+      return [words[0]];
+    }
+    
+    // إذا كان هناك كلمتان أو أكثر، نأخذ أول كلمتين على الأقل
+    if (words.length >= 2) {
+      return words.slice(0, Math.max(2, words.length));
+    }
+    
+    return words;
+  };
+
   // حساب الترتيب داخل الفئة
   const calculateRankInCategory = async (studentGrade: number, category: string) => {
     try {
@@ -36,8 +66,11 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
 
   const handleSearch = async () => {
     // التحقق من أن الاسم يحتوي على 3 أحرف على الأقل
-    if (searchTerm.trim().length < 3) {
-      setSearchError('يجب أن يحتوي الاسم على 3 أحرف على الأقل');
+    const searchWords = getSearchTerms(searchTerm);
+    
+    // التحقق من وجود كلمتين على الأقل أو كلمة واحدة بطول 3 أحرف على الأقل
+    if (searchWords.length === 0 || (searchWords.length === 1 && searchWords[0].length < 3)) {
+      setSearchError('يجب كتابة الاسم الأول والثاني على الأقل أو اسم واحد بـ 3 أحرف على الأقل');
       onSearch(null);
       return;
     }
@@ -52,7 +85,7 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
     setIsLoading(true);
     
     try {
-      console.log('Searching for term:', searchTerm.trim());
+      console.log('Searching for terms:', searchWords);
       
       // التحقق من وجود Supabase
       if (!supabase) {
@@ -61,12 +94,19 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
         return;
       }
       
-      // البحث في جدول results في Supabase
-      const { data, error } = await supabase
-        .from('results')
-        .select('*')
-        .ilike('name', `%${searchTerm.trim()}%`)
-        .limit(1);
+      // البحث المتقدم: نبحث عن النتائج التي تحتوي على جميع الكلمات
+      let query = supabase.from('results').select('*');
+      
+      // إضافة شروط البحث لكل كلمة
+      searchWords.forEach((word, index) => {
+        if (index === 0) {
+          query = query.ilike('name', `%${word}%`);
+        } else {
+          query = query.ilike('name', `%${word}%`);
+        }
+      });
+      
+      const { data, error } = await query.limit(10); // نأخذ أول 10 نتائج للمطابقة
       
       if (error) {
         console.error('Search error:', error);
@@ -78,17 +118,49 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
       console.log('Search completed, results:', data);
       
       if (data && data.length > 0) {
+        // البحث عن أفضل مطابقة
+        let bestMatch = data[0];
+        let bestScore = 0;
+        
+        // حساب نقاط المطابقة لكل نتيجة
+        data.forEach(result => {
+          const normalizedResultName = normalizeText(result.name);
+          let score = 0;
+          
+          // نقاط للكلمات المطابقة
+          searchWords.forEach(word => {
+            if (normalizedResultName.includes(word)) {
+              score += 10;
+            }
+          });
+          
+          // نقاط إضافية للمطابقة الكاملة
+          if (normalizedResultName === normalizeText(searchTerm)) {
+            score += 50;
+          }
+          
+          // نقاط للمطابقة في بداية الاسم
+          if (normalizedResultName.startsWith(searchWords[0])) {
+            score += 20;
+          }
+          
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = result;
+          }
+        });
+        
         // حساب الترتيب داخل الفئة
-        const rank = await calculateRankInCategory(data[0].grade, data[0].category);
+        const rank = await calculateRankInCategory(bestMatch.grade, bestMatch.category);
         
         // تحويل بيانات Supabase إلى Result
         const result: Result = {
-          id: data[0].no,
-          name: data[0].name,
-          category: data[0].category?.toString() || 'غير محدد',
-          grade: data[0].grade || 0,
+          id: bestMatch.no,
+          name: bestMatch.name,
+          category: bestMatch.category?.toString() || 'غير محدد',
+          grade: bestMatch.grade || 0,
           rank: rank,
-          no: data[0].no
+          no: bestMatch.no
         };
         onSearch(result);
       } else {
@@ -199,6 +271,21 @@ export default function SearchSection({ onSearch, isDarkMode = false }: SearchSe
                 </div>
               </div>
             )}
+            
+            {/* Search Tips */}
+            <div className={`p-4 rounded-xl border transition-colors duration-300 ${
+              isDarkMode 
+                ? 'bg-blue-900/20 border-blue-600/30 text-blue-200' 
+                : 'bg-blue-50 border-blue-200 text-blue-700'
+            }`}>
+              <h4 className="font-semibold mb-2">نصائح للبحث:</h4>
+              <ul className="text-sm space-y-1 text-right">
+                <li>• اكتب الاسم الأول والثاني على الأقل</li>
+                <li>• يمكن البحث بجزء من الاسم (مثل: أحمد محمد)</li>
+                <li>• البحث يتجاهل الهمزات والمسافات الزائدة</li>
+                <li>• يمكن كتابة الاسم بأي ترتيب (مثل: محمد أحمد)</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>

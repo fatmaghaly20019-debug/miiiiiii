@@ -15,6 +15,36 @@ export const RegistrationSearch: React.FC<RegistrationSearchProps> = ({ isDarkMo
   const [searchError, setSearchError] = useState('');
   const [totalStudents, setTotalStudents] = useState(0);
 
+  // دالة لتنظيف النص وإزالة الهمزات والمسافات الزائدة
+  const normalizeText = (text: string): string => {
+    return text
+      .trim()
+      .replace(/\s+/g, ' ') // استبدال المسافات المتعددة بمسافة واحدة
+      .replace(/[أإآ]/g, 'ا') // توحيد الألف
+      .replace(/[ىي]/g, 'ي') // توحيد الياء
+      .replace(/ة/g, 'ه') // استبدال التاء المربوطة بالهاء
+      .replace(/[ؤئ]/g, 'ء') // توحيد الهمزة
+      .toLowerCase();
+  };
+
+  // دالة لتقسيم النص إلى كلمات للبحث المتقدم
+  const getSearchTerms = (text: string): string[] => {
+    const normalized = normalizeText(text);
+    const words = normalized.split(' ').filter(word => word.length > 0);
+    
+    // إذا كان هناك كلمة واحدة فقط، نبحث بها إذا كانت 3 أحرف أو أكثر
+    if (words.length === 1) {
+      return words[0].length >= 3 ? [words[0]] : [];
+    }
+    
+    // إذا كان هناك كلمتان أو أكثر، نأخذ أول كلمتين على الأقل
+    if (words.length >= 2) {
+      return words.slice(0, Math.max(2, words.length));
+    }
+    
+    return words;
+  };
+
   useEffect(() => {
     fetchTotalStudents();
   }, []);
@@ -38,8 +68,11 @@ export const RegistrationSearch: React.FC<RegistrationSearchProps> = ({ isDarkMo
 
   const handleSearch = async () => {
     // التحقق من أن الاسم يحتوي على 3 أحرف على الأقل
-    if (searchTerm.trim().length < 3) {
-      setSearchError('يجب أن يحتوي الاسم على 3 أحرف على الأقل');
+    const searchWords = getSearchTerms(searchTerm);
+    
+    // التحقق من وجود كلمتين على الأقل أو كلمة واحدة بطول 3 أحرف على الأقل
+    if (searchWords.length === 0) {
+      setSearchError('يجب كتابة الاسم الأول والثاني على الأقل أو اسم واحد بـ 3 أحرف على الأقل');
       setSearchResult(null);
       setSearchAttempted(false);
       return;
@@ -67,18 +100,62 @@ export const RegistrationSearch: React.FC<RegistrationSearchProps> = ({ isDarkMo
         return;
       }
       
-      const { data, error } = await supabase
-        .from('reciters')
-        .select('*')
-        .ilike('name', `%${searchTerm.trim()}%`)
-        .limit(1);
+      // البحث المتقدم: نبحث عن النتائج التي تحتوي على جميع الكلمات
+      let query = supabase.from('reciters').select('*');
+      
+      // إضافة شروط البحث لكل كلمة
+      searchWords.forEach((word, index) => {
+        if (index === 0) {
+          query = query.ilike('name', `%${word}%`);
+        } else {
+          query = query.ilike('name', `%${word}%`);
+        }
+      });
+      
+      const { data, error } = await query.limit(10); // نأخذ أول 10 نتائج للمطابقة
 
       if (error) {
         console.error('Search error:', error);
         setSearchResult(null);
         setSearchError('حدث خطأ أثناء البحث');
       } else {
-        setSearchResult(data && data.length > 0 ? data[0] : null);
+        if (data && data.length > 0) {
+          // البحث عن أفضل مطابقة
+          let bestMatch = data[0];
+          let bestScore = 0;
+          
+          // حساب نقاط المطابقة لكل نتيجة
+          data.forEach(result => {
+            const normalizedResultName = normalizeText(result.name);
+            let score = 0;
+            
+            // نقاط للكلمات المطابقة
+            searchWords.forEach(word => {
+              if (normalizedResultName.includes(word)) {
+                score += 10;
+              }
+            });
+            
+            // نقاط إضافية للمطابقة الكاملة
+            if (normalizedResultName === normalizeText(searchTerm)) {
+              score += 50;
+            }
+            
+            // نقاط للمطابقة في بداية الاسم
+            if (normalizedResultName.startsWith(searchWords[0])) {
+              score += 20;
+            }
+            
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = result;
+            }
+          });
+          
+          setSearchResult(bestMatch);
+        } else {
+          setSearchResult(null);
+        }
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -251,6 +328,21 @@ export const RegistrationSearch: React.FC<RegistrationSearchProps> = ({ isDarkMo
                 </div>
               </div>
             )}
+            
+            {/* Search Tips */}
+            <div className={`p-4 rounded-xl border transition-colors duration-300 ${
+              isDarkMode 
+                ? 'bg-blue-900/20 border-blue-600/30 text-blue-200' 
+                : 'bg-blue-50 border-blue-200 text-blue-700'
+            }`}>
+              <h4 className="font-semibold mb-2">نصائح للبحث:</h4>
+              <ul className="text-sm space-y-1 text-right">
+                <li>• اكتب الاسم الأول والثاني على الأقل</li>
+                <li>• يمكن البحث بجزء من الاسم (مثل: أحمد محمد)</li>
+                <li>• البحث يتجاهل الهمزات والمسافات الزائدة</li>
+                <li>• يمكن كتابة الاسم بأي ترتيب (مثل: محمد أحمد)</li>
+              </ul>
+            </div>
 
             {/* Search Results */}
             {searchAttempted && (
